@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fréquence cardiaque avec effet de goutte d'eau</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: radial-gradient(ellipse at top, #7cccf7, transparent),
+            radial-gradient(ellipse at bottom, #457295, transparent);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+
+    #main-container {
+      display: flex;
+      width: 90%;
+      max-width: 1200px;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    #form-container {
+      width: 30%;
+      padding: 20px;
+      background-color: #fff;
+      border-radius: 8px;
+      box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    #sketch-holder {
+      width: 65%;
+      height: 400px;
+    }
+
+    input, button {
+      padding: 10px;
+      font-size: 16px;
+      width: 100%;
+      margin-bottom: 10px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+    }
+
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    h2 {
+      font-size: 20px;
+      color: #333;
+      margin-bottom: 10px;
+    }
+
+    .name-list {
+      margin-top: 20px;
+      list-style-type: none;
+      padding: 0;
+    }
+
+    .name-list li {
+      background-color: #e0e0e0;
+      margin: 5px;
+      padding: 10px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    .name-list li:hover {
+      background-color: #c1c1c1;
+    }
+  </style>
+</head>
+<body>
+  <div id="main-container">
+    <!-- Formulaire à gauche -->
+    <div id="form-container">
+      <h2>Ajouter une personne</h2>
+      <input type="text" id="new-name" placeholder="Entrez un nom...">
+      <input type="number" id="new-heart-rate" placeholder="Fréquence cardiaque...">
+      <button id="add-btn">Ajouter</button>
+
+      <h2>Sélectionnez un nom</h2>
+      <!-- Liste des noms cliquables -->
+      <ul id="name-list" class="name-list"></ul>
+
+      <button id="generate-pdf">Générer PDF</button>
+    </div>
+
+    <!-- Canvas p5.js à droite -->
+    <div id="sketch-holder"></div>
+  </div>
+
+  <script>
+    // Supprimer localStorage lors du rafraîchissement forcé (Ctrl + Shift + R)
+    if (performance.navigation.type === 1) {
+      localStorage.clear();  // Efface les données de localStorage lors d'un refresh forcé
+    }
+
+    let heartRates = JSON.parse(localStorage.getItem("heartRates")) || {};
+    let nameColors = JSON.parse(localStorage.getItem("nameColors")) || {};
+    let currentHeartRate = 0;
+    let currentName = '';  // Garder une trace du nom sélectionné
+    let waves = [];  // Tableau pour stocker les ondes
+
+    function setup() {
+      let canvas = createCanvas(600, 400);
+      canvas.parent('sketch-holder');
+      textSize(24);
+      textAlign(CENTER, CENTER);
+
+      // Créer les éléments de la liste cliquables pour les noms existants
+      updateNameList();
+
+      // Ajouter un événement au bouton "Ajouter"
+      let addButton = select('#add-btn');
+      addButton.mousePressed(addNewPerson);
+
+      // Ajouter un événement pour le bouton "Générer PDF"
+      let generatePdfButton = select('#generate-pdf');
+      generatePdfButton.mousePressed(generatePDF);
+    }
+
+    function draw() {
+      clear();  // Effacer l'écran, maintenir la transparence
+
+      if (currentHeartRate > 0) {
+        // Affichage du nom et fréquence cardiaque
+        fill(0);
+        text('Fréquence cardiaque de : ' + currentName + ' - ' + currentHeartRate + ' BPM', width / 2, height / 4);
+
+        // Affichage des ondes (gouttes)
+        for (let i = waves.length - 1; i >= 0; i--) {
+          let wave = waves[i];
+          wave.update();
+          wave.display();
+
+          // Supprimer les ondes qui ont disparu
+          if (wave.alpha <= 0) {
+            waves.splice(i, 1);
+          }
+        }
+
+        // Gérer l'effet de la "goutte" à chaque battement
+        manageWaves();
+      }
+    }
+
+    // Fonction pour gérer l'effet des vagues (gouttes)
+    function manageWaves() {
+      let interval = 60 / currentHeartRate * 1000;  // Calcul du temps entre les battements (en ms)
+
+      if (frameCount % Math.floor(interval / 1000 * 60) === 0) {
+        createWave();
+      }
+    }
+
+    // Fonction pour créer une nouvelle "goutte" (onde)
+    function createWave() {
+      let wave = new Wave(width / 2, height / 2, currentHeartRate, nameColors[currentName]);
+      waves.push(wave);
+    }
+
+    // Classe Wave pour gérer l'onde
+    class Wave {
+      constructor(x, y, heartRate, color) {
+        this.x = x;
+        this.y = y;
+        this.size = 5;  // Taille initiale de l'onde
+        this.maxSize = map(heartRate, 60, 100, 50, 200); // Taille maximale de l'onde
+        this.alpha = 255;  // Opacité de l'onde (disparaît au fil du temps)
+        this.speed = 2;  // Vitesse de l'expansion de l'onde
+        this.lifespan = 255;
+        this.color = color;  // Couleur spécifique à l'onde
+      }
+
+      update() {
+        this.size += this.speed;
+        this.lifespan -= 4;
+      }
+
+      display() {
+        noStroke();
+        fill(this.color[0], this.color[1], this.color[2], this.lifespan);
+        ellipse(this.x, this.y, this.size * 2, this.size * 2);
+      }
+    }
+
+    // Fonction pour mettre à jour la liste des noms
+    function updateNameList() {
+      let nameList = select('#name-list');
+      nameList.html('');
+
+      for (let name in heartRates) {
+        let li = createElement('li', name);
+        li.mousePressed(() => selectHeartRate(name));
+        li.parent(nameList);
+      }
+    }
+
+    // Fonction pour mettre à jour la fréquence cardiaque et le nom sélectionné
+    function selectHeartRate(name) {
+      currentName = name;
+      currentHeartRate = heartRates[name];
+      waves = [];  // Réinitialiser les ondes avant d'en créer de nouvelles
+    }
+
+    // Fonction pour ajouter une nouvelle personne avec une fréquence cardiaque
+    function addNewPerson() {
+      let newName = select('#new-name').value();
+      let newHeartRate = select('#new-heart-rate').value();
+      
+      if (newName && newHeartRate) {
+        // Ajouter la nouvelle personne au tableau heartRates
+        heartRates[newName] = parseInt(newHeartRate);
+
+        // Ajouter une couleur unique pour cette nouvelle personne
+        nameColors[newName] = [random(255), random(255), random(255)];  // Couleur aléatoire pour la personne
+
+        // Sauvegarder dans localStorage
+        localStorage.setItem('heartRates', JSON.stringify(heartRates));
+        localStorage.setItem('nameColors', JSON.stringify(nameColors));
+
+        // Réinitialiser les champs de saisie
+        select('#new-name').value('');
+        select('#new-heart-rate').value('');
+
+        // Mettre à jour la liste
+        updateNameList();
+      } else {
+        alert('Veuillez entrer un nom et une fréquence cardiaque valides.');
+      }
+    }
+
+    // Fonction pour générer un PDF avec toutes les données enregistrées
+    function generatePDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+
+      let yOffset = 10;
+      doc.setFontSize(16);
+      doc.text('Liste des personnes et leurs fréquences cardiaques :', 10, yOffset);
+
+      yOffset += 10;
+      for (let name in heartRates) {
+        doc.text(`${name}: ${heartRates[name]} BPM`, 10, yOffset);
+        yOffset += 10;
+      }
+
+      doc.save('frequencies.pdf');
+    }
+  </script>
+</body>
+</html>
